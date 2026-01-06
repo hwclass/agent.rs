@@ -1,0 +1,21 @@
+[package]
+name = "agent-native"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "agent-native"
+path = "src/main.rs"
+
+[dependencies]
+agent-core = { path = "../agent-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+libc = "0.2"
+
+# Using llama-cpp-2 - stable Rust bindings to llama.cpp
+llama-cpp-2 = "0.1.72"

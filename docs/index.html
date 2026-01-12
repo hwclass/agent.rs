@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>agent.rs - Correctness-First Agent Framework</title>
+  <meta name="description" content="A host-agnostic, correctness-first agent framework written in Rust. Same agent logic runs unchanged across native, browser, and edge environments.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" type="image/png" href="logo.png">
+</head>
+<body>
+  <header>
+    <div class="container">
+      <div class="logo-section">
+        <img src="agent-rs-logo.png" alt="agent.rs logo" class="logo">
+      </div>
+      <nav>
+        <a href="#why">Why</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#getting-started">Get Started</a>
+        <a href="#hosts">Hosts</a>
+        <a href="https://github.com/hwclass/agent.rs" target="_blank">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+  <div class="container hero-content">
+    <h1 class="hero-title">
+      A correct agent that fails honestly<br />
+      is better than one that <span class="muted">“usually works.”</span>
+    </h1>
+
+    <p class="hero-lead">
+      <strong>agent.rs</strong> is a host-agnostic, correctness-first agent framework
+      written in Rust, designed to run unchanged across native, browser, and edge
+      environments using WebAssembly.
+    </p>
+
+    <p class="hero-sub">
+      It separates agent intelligence from host capabilities, enforces semantic
+      guardrails, and refuses to return plausible-looking but incorrect results.
+    </p>
+
+    <div class="cta">
+  <a href="#getting-started" class="btn primary">Get Started</a>
+  <a href="https://github.com/hwclass/agent.rs" class="btn secondary" target="_blank">
+    View on GitHub
+  </a>
+</div>
+  </div>
+</section>
+
+    <section id="why" class="section">
+      <div class="container">
+        <h2>Why agent.rs?</h2>
+        <p>Most agent frameworks optimize for convenience: auto-invoking tools, silently retrying, hallucinating "final answers" when things go wrong.</p>
+        <p><strong>agent.rs optimizes for correctness.</strong></p>
+        <p>It makes failure explicit, observable, and actionable, while keeping the agent logic:</p>
+        <ul class="features">
+          <li>Portable</li>
+          <li>Auditable</li>
+          <li>Deterministic</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="principles" class="section alt">
+      <div class="container">
+        <h2>Core Design Principles</h2>
+
+        <div class="principle">
+          <h3>1. The Host Provides Capabilities, Not Intelligence</h3>
+          <ul>
+            <li>Hosts provide LLMs, tools, and I/O</li>
+            <li>The agent provides decision logic</li>
+            <li>No host-specific branching inside the agent</li>
+          </ul>
+        </div>
+
+        <div class="principle">
+          <h3>2. Same Agent, Multiple Hosts</h3>
+          <p>The same <code>agent-core</code> runs across environments without modification.</p>
+        </div>
+
+        <div class="principle">
+          <h3>3. Explicit Failure Semantics</h3>
+          <ul>
+            <li>No silent success</li>
+            <li>No hallucinated correctness</li>
+            <li>Guardrails reject invalid outputs by design</li>
+          </ul>
+        </div>
+
+        <div class="principle">
+          <h3>4. WASM as a State Transition Engine</h3>
+          <ul>
+            <li>Agent logic is pure</li>
+            <li>Deterministic state → decision transitions</li>
+            <li>Side effects handled exclusively by the host</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture-diagram" class="section architecture-visual">
+  <div class="container">
+    <h2>One Agent, Multiple Hosts</h2>
+
+    <p class="subtitle">
+      The same <code>agent-core</code> logic runs unchanged across native, browser,
+      and edge environments. Hosts provide capabilities — the agent provides decisions.
+    </p>
+
+    <div class="diagram-wrapper">
+      <img
+        src="agent-rs-architectural-diagram.png"
+        alt="agent.rs architecture diagram showing CLI, Browser, and Edge hosts sharing the same agent-core"
+        class="architecture-image"
+      />
+    </div>
+
+    <div class="architecture-caption">
+      <ul>
+        <li><strong>Native / CLI:</strong> Local inference, shell tools, persistent state</li>
+        <li><strong>Browser:</strong> WebLLM, DOM & fetch tools, session state</li>
+        <li><strong>Edge:</strong> HTTP LLMs, fetch-only tools, stateless execution</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+    <section id="hosts" class="section alt">
+      <div class="container">
+        <h2>Three Hosts, One Agent</h2>
+
+        <div class="hosts-grid">
+          <div class="host-card">
+            <h3>Native</h3>
+            <p><strong>LLM:</strong> llama.cpp (local)</p>
+            <p><strong>Tools:</strong> shell (with approval)</p>
+            <p><strong>State:</strong> Persistent</p>
+            <p><strong>Use Case:</strong> CLI automation</p>
+          </div>
+
+          <div class="host-card">
+            <h3>Browser</h3>
+            <p><strong>LLM:</strong> WebLLM (local)</p>
+            <p><strong>Tools:</strong> DOM, fetch</p>
+            <p><strong>State:</strong> Session</p>
+            <p><strong>Use Case:</strong> Interactive UI</p>
+          </div>
+
+          <div class="host-card">
+            <h3>Edge</h3>
+            <p><strong>LLM:</strong> HTTP LLM API</p>
+            <p><strong>Tools:</strong> fetch_url</p>
+            <p><strong>State:</strong> Stateless</p>
+            <p><strong>Use Case:</strong> Serverless APIs</p>
+          </div>
+        </div>
+
+        <div class="shared-features">
+          <p><strong>All hosts share:</strong></p>
+          <ul>
+            <li>agent-core logic</li>
+            <li>identical guardrails</li>
+            <li>identical tool invocation rules</li>
+            <li>identical failure semantics</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="repo-structure" class="section">
+      <div class="container">
+        <h2>Repository Structure</h2>
+        <pre class="code-block">
+agent.rs/
+├─ crates/
+│  ├─ agent-core/     # Pure agent logic (WASM-compatible)
+│  ├─ agent-native/   # CLI runtime (llama.cpp, shell tools)
+│  └─ agent-wasm/     # WASM bindings for agent-core
+│
+├─ examples/
+│  ├─ shell/          # Native CLI example
+│  ├─ browser/        # WebLLM + WASM browser demo
+│  └─ edge/           # Deno-based edge runtime
+│
+├─ Makefile
+└─ README.md
+        </pre>
+      </div>
+    </section>
+
+    <section id="getting-started" class="section alt">
+      <div class="container">
+        <h2>Getting Started</h2>
+
+        <div class="demo-section">
+          <h3>Native (CLI)</h3>
+          <pre class="code-block">
+# Setup
+make setup
+
+# Download a model (example: Granite 4.0 Micro)
+wget https://huggingface.co/ibm-granite/granite-4.0-micro-GGUF/resolve/main/granite-4.0-micro-Q8_0.gguf
+
+# Run demo
+make demo-shell MODEL_PATH=./granite-4.0-micro-Q8_0.gguf
+
+# Or configure .env and run
+cp .env.example .env
+# Edit .env: MODEL_PATH=./granite-4.0-micro-Q8_0.gguf
+make demo-shell
+          </pre>
+        </div>
+
+        <div class="demo-section">
+          <h3>Browser (WebLLM + WASM)</h3>
+          <pre class="code-block">
+make demo-browser
+# Opens http://localhost:8080
+
+# Features:
+# - Runs fully locally
+# - No API keys needed
+# - WebGPU required
+# - First run downloads model (~1.8GB)
+          </pre>
+        </div>
+
+        <div class="demo-section">
+          <h3>Edge (Deno)</h3>
+          <pre class="code-block">
+# Configure environment
+cp .env.example .env
+# Edit .env:
+# LLM_ENDPOINT=https://api.openai.com/v1/chat/completions
+# LLM_API_KEY=sk-...
+# LLM_MODEL=gpt-4o-mini
+
+# Run
+make demo-edge
+
+# Test in another terminal:
+curl -X POST http://localhost:8000 \
+  -H "Content-Type: application/json" \
+  -d '{"query":"Fetch data from https://httpbin.org/json"}'
+          </pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="guardrails" class="section">
+      <div class="container">
+        <h2>Guardrails: Correctness as a First-Class Concern</h2>
+        <p class="subtitle">agent.rs uses semantic guardrails inspired by Mozilla.ai's any-guardrail pattern.</p>
+
+        <div class="guardrails-grid">
+          <div class="guardrail-card">
+            <h3>What Guardrails Do</h3>
+            <ul>
+              <li>Reject empty outputs</li>
+              <li>Reject metadata-only outputs (e.g. "total 123")</li>
+              <li>Reject outputs lacking substance</li>
+              <li>Prevent silent success</li>
+            </ul>
+          </div>
+
+          <div class="guardrail-card">
+            <h3>What Happens on Failure</h3>
+            <ul>
+              <li>Clear explanation</li>
+              <li>Explicit rejection reason</li>
+              <li>Actionable suggestions</li>
+              <li>Non-zero exit / visible UI failure</li>
+            </ul>
+          </div>
+        </div>
+
+        <p class="emphasis">Failures are signals, not bugs.</p>
+      </div>
+    </section>
+
+    <section id="failure-modes" class="section alt">
+      <div class="container">
+        <h2>Known Failure Modes (By Design)</h2>
+        <p>Some tasks cannot be completed correctly with:</p>
+        <ul>
+          <li>Small models (< 7B parameters)</li>
+          <li>Insufficient tool reasoning capability</li>
+          <li>Ambiguous instructions</li>
+        </ul>
+        <p><strong>agent.rs will:</strong></p>
+        <ul>
+          <li>Fail loudly</li>
+          <li>Explain why</li>
+          <li>Refuse to hallucinate</li>
+        </ul>
+        <p class="emphasis">This is intentional.</p>
+      </div>
+    </section>
+
+    <section id="roadmap" class="section">
+      <div class="container">
+        <h2>Roadmap</h2>
+
+        <div class="roadmap-timeline">
+          <div class="roadmap-item">
+            <h3>Near-Term</h3>
+            <ul>
+              <li>Tool postconditions (semantic contracts)</li>
+              <li>Executable validation (tests as guardrails)</li>
+              <li>Model capability negotiation</li>
+            </ul>
+          </div>
+
+          <div class="roadmap-item">
+            <h3>Medium-Term</h3>
+            <ul>
+              <li>Multi-agent orchestration</li>
+              <li>Streaming decisions</li>
+              <li>Policy-based guardrail chains</li>
+            </ul>
+          </div>
+
+          <div class="roadmap-item">
+            <h3>Long-Term</h3>
+            <ul>
+              <li>Formal agent contracts</li>
+              <li>Deterministic replay</li>
+              <li>Standardized WASM agent ABI</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="why-rust" class="section alt">
+      <div class="container">
+        <h2>Why Rust?</h2>
+        <p>Rust enables:</p>
+        <ul class="features">
+          <li>Memory safety</li>
+          <li>Deterministic execution</li>
+          <li>Zero-cost abstractions</li>
+          <li>First-class WASM support</li>
+        </ul>
+        <p class="emphasis">For agent systems that must be trusted, Rust is not optional.</p>
+      </div>
+    </section>
+
+    <section id="inspiration" class="section">
+      <div class="container">
+        <h2>Inspiration</h2>
+        <ul>
+          <li><strong>Mozilla.ai</strong> — agent.cpp, llamafile, any-guardrail</li>
+          <li>WASM-first system design</li>
+          <li>Correctness-over-convenience philosophy</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container">
+      <p>&copy; 2026 agent.rs</p>
+      <p>Licensed under Apache-2.0</p>
+      <p>
+        <a href="https://github.com/hwclass/agent.rs" target="_blank">GitHub</a> •
+        <a href="https://github.com/hwclass/agent.rs/issues" target="_blank">Issues</a> •
+        <a href="https://github.com/hwclass/agent.rs/blob/main/LICENSE" target="_blank">License</a>
+      </p>
+    </div>
+  </footer>
+</body>
+</html>

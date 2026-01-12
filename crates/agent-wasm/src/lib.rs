@@ -42,6 +42,9 @@ pub enum DecisionOutput {
 
     /// Agent is done
     Done { answer: String },
+
+    /// Model produced inconclusive output (reasoning without action)
+    Inconclusive { output: String },
 }
 
 /// Run one step of the agent loop in WASM
@@ -82,6 +85,7 @@ pub fn run_agent_step(input_json: &str) -> Result<String, JsValue> {
             params: req.params,
         },
         agent_core::AgentDecision::Done(answer) => DecisionOutput::Done { answer },
+        agent_core::AgentDecision::Inconclusive(output) => DecisionOutput::Inconclusive { output },
     };
 
     // Serialize state

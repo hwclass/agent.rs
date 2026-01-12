@@ -61,13 +61,17 @@ pub enum AgentDecision {
 
     /// The agent has produced a final answer
     Done(String),
+
+    /// The agent produced inconclusive output (reasoning without action)
+    /// This indicates the model failed to follow instructions properly
+    Inconclusive(String),
 }
 
 /// Process model output and decide the next action
 ///
 /// This is the core agent loop logic:
 /// 1. Parse the model output
-/// 2. Decide if it's a tool call or final answer
+/// 2. Decide if it's a tool call, final answer, or inconclusive
 /// 3. Return the appropriate decision
 ///
 /// This function is pure, deterministic, and has no side effects.
@@ -89,6 +93,11 @@ pub fn process_model_output(
             state.is_complete = true;
             state.final_answer = Some(answer.clone());
             AgentDecision::Done(answer)
+        }
+        ParseResult::Inconclusive(output) => {
+            // Model produced reasoning/explanation without completing the task
+            // Don't add to history yet - runtime will handle corrective retry
+            AgentDecision::Inconclusive(output)
         }
     }
 }

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browser Example | agent.rs</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      padding: 2rem;
+      max-width: 800px;
+      margin: 0 auto;
+      background: #f5f5f5;
+    }
+
+    h1 {
+      color: #333;
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      color: #666;
+      font-size: 0.9rem;
+      margin-bottom: 2rem;
+    }
+
+    .card {
+      background: white;
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: #333;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 0.75rem;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 1rem;
+      font-family: inherit;
+    }
+
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 4px;
+      font-size: 1rem;
+      cursor: pointer;
+      font-weight: 600;
+      margin-top: 1rem;
+      transition: background 0.2s;
+    }
+
+    button:hover:not(:disabled) {
+      background: #0056b3;
+    }
+
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    .status {
+      padding: 0.75rem;
+      border-radius: 4px;
+      margin-top: 1rem;
+      font-size: 0.9rem;
+    }
+
+    .status.info {
+      background: #e7f3ff;
+      border-left: 4px solid #007bff;
+      color: #004085;
+    }
+
+    .status.success {
+      background: #d4edda;
+      border-left: 4px solid #28a745;
+      color: #155724;
+    }
+
+    .status.error {
+      background: #f8d7da;
+      border-left: 4px solid #dc3545;
+      color: #721c24;
+    }
+
+    .status.warning {
+      background: #fff3cd;
+      border-left: 4px solid #ffc107;
+      color: #856404;
+    }
+
+    .output {
+      margin-top: 1rem;
+    }
+
+    .tool-call {
+      background: #f8f9fa;
+      padding: 1rem;
+      border-radius: 4px;
+      margin: 0.5rem 0;
+      font-family: 'Courier New', monospace;
+      font-size: 0.9rem;
+    }
+
+    .tool-call .label {
+      font-weight: 600;
+      color: #666;
+    }
+
+    .guardrail-result {
+      padding: 0.5rem;
+      margin: 0.5rem 0;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .guardrail-result.accept {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .guardrail-result.reject {
+      background: #f8d7da;
+      color: #721c24;
+    }
+
+    .final-answer {
+      background: #e7f3ff;
+      padding: 1.5rem;
+      border-radius: 4px;
+      margin-top: 1rem;
+      border-left: 4px solid #007bff;
+    }
+
+    .final-answer h3 {
+      margin-bottom: 0.5rem;
+      color: #004085;
+    }
+
+    .error-detail {
+      background: #f8f9fa;
+      padding: 1rem;
+      border-radius: 4px;
+      margin-top: 0.5rem;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+      white-space: pre-wrap;
+    }
+
+    .progress {
+      margin-top: 0.5rem;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 4px;
+      background: #e0e0e0;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: #007bff;
+      transition: width 0.3s ease;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    code {
+      background: #f4f4f4;
+      padding: 0.2rem 0.4rem;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.9em;
+    }
+  </style>
+</head>
+<body>
+  <h1>agent.rs Browser Example</h1>
+  <p class="subtitle">
+    Local-first AI agent with WebLLM + WASM • No API keys • Runs entirely in your browser
+  </p>
+
+  <div class="card">
+    <div id="model-status" class="status info">
+      Initializing WebLLM...
+    </div>
+    <div id="model-progress" class="progress hidden">
+      <div class="progress-bar">
+        <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <label for="query">Query</label>
+    <input
+      type="text"
+      id="query"
+      placeholder="Fetch data from https://httpbin.org/json"
+      disabled
+    />
+    <button id="run-btn" disabled>Run Agent</button>
+
+    <div style="margin-top: 1rem; padding: 0.75rem; background: #f8f9fa; border-radius: 4px; font-size: 0.85rem;">
+      <strong>Example queries:</strong>
+      <ul style="margin: 0.5rem 0 0 1.5rem; line-height: 1.8;">
+        <li><code>Fetch data from https://httpbin.org/json</code> - CORS-enabled API</li>
+        <li><code>Fetch data from https://api.github.com/users/github</code> - CORS-enabled API</li>
+        <li><code>Extract the page title</code> - Uses read_dom tool (this page)</li>
+        <li><code>What is 2 + 2?</code> - No tool needed (answer directly)</li>
+      </ul>
+      <p style="margin-top: 0.5rem; font-size: 0.8rem; color: #666;">
+        <strong>Note:</strong> fetch_url automatically uses a CORS proxy for sites that don't allow cross-origin requests.
+      </p>
+    </div>
+  </div>
+
+  <div id="output" class="card hidden">
+    <h3>Output</h3>
+    <div id="output-content"></div>
+  </div>
+
+  <script type="module" src="/main.ts"></script>
+</body>
+</html>

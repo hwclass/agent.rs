@@ -103,7 +103,21 @@ wget https://huggingface.co/ibm-granite/granite-4.0-micro-GGUF/resolve/main/gran
 # wget https://huggingface.co/ibm-granite/granite-3.1-2b-instruct-GGUF/resolve/main/granite-3.1-2b-instruct-Q4_K_M.gguf
 ```
 
-**3. Build the Project**
+**3. Configure Environment (Optional)**
+
+You can configure environment variables via a `.env` file for convenience:
+
+```bash
+# Copy the example configuration
+cp .env.example .env
+
+# Edit .env to set your paths and API keys
+# MODEL_PATH=/path/to/your/model.gguf          # For native demo
+# LLM_ENDPOINT=https://api.openai.com/...      # For edge demo
+# LLM_API_KEY=sk-...                            # For edge demo
+```
+
+**4. Build the Project**
 
 ```bash
 make setup
@@ -116,12 +130,21 @@ The setup script will:
 - Build all crates
 - Run tests
 
-**4. Run the Demo**
+**5. Run the Demo**
 
 ```bash
+# Option 1: Direct command
 ./target/release/agent-native \
   --model ./granite-4.0-micro-Q8_0.gguf \
   --query "List files and show disk usage"
+
+# Option 2: Using make (reads MODEL_PATH from .env)
+make demo-shell
+
+# Run other demos
+make demo           # Show all available demos
+make demo-browser   # Browser demo with WebLLM
+make demo-edge      # Edge demo with Deno
 ```
 
 ### Example Session
@@ -190,10 +213,10 @@ import init, { create_agent_state, run_agent_step } from './agent_wasm.js';
 await init();
 
 // 1. Create initial agent state
-let stateJson = create_agent_state("List files");
+let stateJson = create_agent_state("What is 2 + 2?");
 
-// 2. Host provides model output (from your LLM)
-const modelOutput = '{"tool":"shell","command":"ls"}';
+// 2. Host provides model output (from your LLM API)
+const modelOutput = '{"tool":"calculator","expression":"2+2"}';
 
 // 3. WASM processes observation and returns decision
 const input = {
@@ -208,9 +231,13 @@ if (output.decision.type === "invoke_tool") {
   console.log("Tool requested:", output.decision.tool);
   console.log("Parameters:", output.decision.params);
 
-  // Host executes tool (not shown)
-  // Host provides tool output to next iteration
-  stateJson = output.state_json;  // Update state
+  // Host executes tool (browser-safe example)
+  const result = eval(output.decision.params.expression); // "4"
+
+  // Feed result back to agent (next iteration)
+  stateJson = output.state_json;
+} else if (output.decision.type === "done") {
+  console.log("Final answer:", output.decision.answer);
 }
 ```
 
@@ -219,6 +246,8 @@ if (output.decision.type === "invoke_tool") {
 - WASM receives text → produces decision
 - Host executes tool → produces output
 - Repeat until `decision.type === "done"`
+
+**Note:** The `agent-native` demo uses a `shell` tool for local CLI usage. In browser/edge contexts, you'd define tools appropriate to that environment (API calls, calculations, DOM operations, etc.).
 
 ## Agent Loop Semantics
 
@@ -301,6 +330,63 @@ One tool demonstrates:
 
 More tools would dilute the core concepts.
 
+## Known Failure Modes (By Design)
+
+**agent.rs prioritizes correctness over convenience.** The system includes semantic guardrails that validate tool outputs to prevent false-positive success.
+
+### What This Means
+
+When the agent executes a tool, it validates that the output is semantically meaningful for the requested task. If validation fails:
+
+1. The system attempts one corrective retry with stricter instructions
+2. If the retry also fails validation, **the agent fails explicitly**
+3. The system will NOT return plausible-looking but incorrect results
+
+### Why Some Tasks Fail
+
+Some models (particularly smaller ones under 7B parameters) lack sufficient tool-reasoning capability. They may:
+
+- Generate syntactically correct tool calls
+- Execute tools successfully
+- But produce outputs that don't actually satisfy the task
+
+**Example:**
+```
+Query: "List the biggest file in the directory by size"
+Tool call: {"tool":"shell","command":"ls -lS | head -n 1"}
+Tool output: "total 7079928"
+Result: ❌ REJECTED - output contains only metadata, not actual file data
+```
+
+### This is Intentional
+
+The guardrail system (inspired by [Mozilla.ai's any-guardrail pattern](https://github.com/mozilla-ai/any-guardrail)) prevents the agent from:
+
+- Hallucinating success based on metadata
+- Accepting empty or malformed outputs
+- Claiming task completion when the result is semantically invalid
+
+**A correct system that fails honestly is better than one that returns plausible-looking but incorrect results.**
+
+### What You Can Do
+
+If the agent fails with guardrail rejection:
+
+- Use a **larger model** (7B+ parameters recommended)
+- Use a model **specifically fine-tuned for tool use**
+- **Simplify the query** to reduce reasoning complexity
+- Verify the task is **achievable with available tools**
+
+### Future Direction
+
+Current guardrails use heuristic validation (e.g., rejecting `"total <number>"` as metadata-only output). Future enhancements may include:
+
+- **Tool postconditions** - explicit semantic contracts declared by tools
+- **Executable validation** - tests as postconditions that verify correctness
+- **Model capability negotiation** - adapting task complexity to model capabilities
+
+See the [Roadmap](#roadmap) section below for details.
+
 ## Non-Goals
 
 This is a **proof-of-concept**, not a production framework:
@@ -335,6 +421,14 @@ For best results with the demo:
 
 Larger models work better but are slower. For a quick demo, use the smallest instruct-tuned model you can find.
 
+## Examples
+
+Complete working examples are available in the [examples/](examples/) directory:
+
+- **[examples/shell/](examples/shell/)** - CLI shell tool demo with human-in-the-loop approval
+- **[examples/browser/](examples/browser/)** - Minimal browser host with WebLLM local inference and real browser tools
+- **[examples/edge/](examples/edge/)** - Stateless edge runtime (Deno) with HTTP-based LLM and fetch_url tool
+
 ## Extending the Demo
 
 ### Adding a New Tool
@@ -363,6 +457,80 @@ The agent-core logic is backend-agnostic. To use a different inference backend:
 2. Create a new crate (e.g., `agent-llamacpp-rs`, `agent-candle`, etc.)
 3. Implement your own `generate()` function
 4. Use the same agent loop semantics
+
+## Roadmap
+
+### Semantic Validation Enhancements
+
+Current guardrails use heuristic validation to detect invalid tool outputs. Future work will formalize correctness as a first-class architectural concept.
+
+#### Tool Postconditions
+
+**Problem:** Current guardrails reject obvious failures (empty output, metadata-only) but cannot verify semantic correctness.
+
+**Solution:** Tools declare explicit contracts that outputs must satisfy.
+
+```rust
+pub struct ToolPostcondition {
+    name: String,
+    validate: Box<dyn Fn(&ToolOutput) -> ValidationResult>,
+}
+
+// Example: shell tool listing files
+fn file_list_postcondition(output: &ToolOutput) -> ValidationResult {
+    if output.lines().all(|line| line.starts_with("total")) {
+        return ValidationResult::Reject("Output contains only metadata");
+    }
+    // More sophisticated checks...
+}
+```
+
+**Impact:** Catches semantic errors that smaller models consistently make, enabling graceful degradation or task decomposition.
+
+#### Executable Validation
+
+**Problem:** Some correctness criteria cannot be expressed as simple predicates.
+
+**Solution:** Tests as postconditions - executable specifications that verify outputs.
+
+```rust
+// Postcondition: "output should contain at least one file entry"
+fn validate_file_list(output: &str) -> bool {
+    output.lines()
+        .any(|line| line.contains(".txt") || line.contains(".rs"))
+}
+```
+
+**Benefit:** Aligns with agent.cpp's extensibility model and any-guardrail's pluggable validation pattern.
+
+#### Model Capability Negotiation
+
+**Problem:** Small models fail on complex tasks; large models are slow for simple ones.
+
+**Solution:** Runtime capability detection and task adaptation.
+
+- Measure model success rate on validation checks
+- Decompose tasks when model struggles
+- Route simple queries to fast models, complex ones to capable models
+
+**This turns validation failures into architectural feedback.**
+
+### Relationship to Current Failures
+
+When the agent fails with guardrail rejection today, it's exposing a capability gap. The roadmap addresses this by:
+
+1. **Formalizing contracts** (postconditions) - makes requirements explicit
+2. **Automating verification** (executable validation) - removes heuristic guessing
+3. **Adapting to models** (capability negotiation) - matches task complexity to model strength
+
+**These enhancements don't eliminate failure - they make failure productive.**
+
+A system that:
+- Attempts the task
+- Validates the result
+- Fails explicitly when validation fails
+
+...is fundamentally more trustworthy than one that always returns plausible-looking output.
 
 ## License
 

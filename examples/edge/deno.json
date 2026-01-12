@@ -1,0 +1,11 @@
+{
+  "tasks": {
+    "start": "deno run --allow-net --allow-read --allow-env main.ts"
+  },
+  "compilerOptions": {
+    "lib": ["deno.window"]
+  },
+  "imports": {
+    "@std/dotenv": "jsr:@std/dotenv@^0.225.0"
+  }
+}

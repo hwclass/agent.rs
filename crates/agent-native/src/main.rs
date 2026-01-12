@@ -1,19 +1,16 @@
+mod llama_cpp_backend;
+mod llm;
+
 use agent_core::{
     agent::{apply_tool_result, process_model_output, AgentDecision, AgentState, Role},
+    guardrail::{GuardrailChain, GuardrailContext, GuardrailResult, PlausibilityGuard},
     tool::{ToolRequest, ToolResult},
 };
 use anyhow::{Context, Result};
 use clap::Parser;
-use llama_cpp_2::context::params::LlamaContextParams;
-use llama_cpp_2::llama_backend::LlamaBackend;
-use llama_cpp_2::llama_batch::LlamaBatch;
-use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::LlamaModel;
-use llama_cpp_2::model::{AddBos, Special};
-use llama_cpp_2::token::data_array::LlamaTokenDataArray;
+use llama_cpp_backend::LlamaCppBackend;
+use llm::{LLMBackend, LLMInput};
 use std::io::{self, Write};
-use std::num::NonZeroU32;
-use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -68,21 +65,13 @@ fn main() -> Result<()> {
     println!("=== agent.rs ===");
     println!("Query: {}\n", args.query);
 
-    // Initialize llama.cpp backend
-    let backend = LlamaBackend::init()?;
+    // Initialize LLM backend (llama.cpp in this case)
+    let mut llm_backend = LlamaCppBackend::new(&args.model)
+        .context("Failed to initialize LLM backend")?;
 
-    // Load model
-    let model_params = LlamaModelParams::default();
-    let model = LlamaModel::load_from_file(&backend, &args.model, &model_params)
-        .context("Failed to load model")?;
-
-    // Create context (Metal logs will appear during first inference, not here)
-    let ctx_params = LlamaContextParams::default()
-        .with_n_ctx(NonZeroU32::new(2048)); // API expects Option<NonZeroU32>
-
-    let mut ctx = model
-        .new_context(&backend, ctx_params)
-        .context("Failed to create context")?;
+    // Initialize semantic guardrail chain
+    let guardrail_chain = GuardrailChain::new()
+        .add(Box::new(PlausibilityGuard::new()));
 
     // Initialize agent state
     let mut state = AgentState::new(&args.query);
@@ -96,39 +85,157 @@ fn main() -> Result<()> {
         iteration += 1;
 
         // Lifecycle callback: before_llm_call
-        let prompt = before_llm_call(&state, tool_used);
+        let prompt = before_llm_call(&state, tool_used, false);
 
-        let (response, tokens_generated) = generate(&model, &mut ctx, &prompt, args.max_tokens, current_pos, first_generation)?;
-        current_pos += tokens_generated;
+        // Call LLM backend
+        let llm_output = llm_backend.infer(LLMInput {
+            prompt,
+            max_tokens: args.max_tokens,
+            current_pos,
+            first_generation,
+        })?;
+
+        current_pos += llm_output.tokens_processed;
         first_generation = false;
 
         // Process the output
-        match process_model_output(&mut state, response) {
+        match process_model_output(&mut state, llm_output.text) {
             AgentDecision::InvokeTool(tool_request) => {
                 // Execute tool
                 let result = execute_tool(&tool_request)?;
 
-                // Apply result to state
-                apply_tool_result(&mut state, &result);
+                // Validate tool output with semantic guardrails
+                let guard_ctx = GuardrailContext {
+                    state: &state,
+                    tool_request: &tool_request,
+                    tool_result: &result,
+                };
 
-                // Lifecycle callback: after_tool_execution
-                after_tool_execution(&mut state, &result);
-                tool_used = true;
+                match guardrail_chain.validate(&guard_ctx) {
+                    GuardrailResult::Accept => {
+                        // Apply result to state
+                        apply_tool_result(&mut state, &result);
+
+                        // Lifecycle callback: after_tool_execution
+                        after_tool_execution(&mut state, &result);
+                        tool_used = true;
+                    }
+                    GuardrailResult::Reject { reason } => {
+                        // Guardrail rejected output - treat as inconclusive
+                        eprintln!("\n⚠️  Guardrail rejected tool output:");
+                        eprintln!("   {}", reason);
+                        eprintln!("\n   Attempting corrective retry...\n");
+
+                        // Corrective retry with stricter instructions
+                        let corrective_prompt = before_llm_call(&state, tool_used, true);
+
+                        let retry_output = llm_backend.infer(LLMInput {
+                            prompt: corrective_prompt,
+                            max_tokens: args.max_tokens,
+                            current_pos,
+                            first_generation: false,
+                        })?;
+
+                        current_pos += retry_output.tokens_processed;
+
+                        // Process retry output
+                        match process_model_output(&mut state, retry_output.text) {
+                            AgentDecision::InvokeTool(retry_request) => {
+                                // Execute retry
+                                let retry_result = execute_tool(&retry_request)?;
+
+                                // Validate retry output
+                                let retry_guard_ctx = GuardrailContext {
+                                    state: &state,
+                                    tool_request: &retry_request,
+                                    tool_result: &retry_result,
+                                };
+
+                                match guardrail_chain.validate(&retry_guard_ctx) {
+                                    GuardrailResult::Accept => {
+                                        // Success - apply result
+                                        apply_tool_result(&mut state, &retry_result);
+                                        after_tool_execution(&mut state, &retry_result);
+                                        tool_used = true;
+                                    }
+                                    GuardrailResult::Reject { reason: retry_reason } => {
+                                        report_guardrail_failure(&reason, &retry_reason);
+                                    }
+                                }
+                            }
+                            AgentDecision::Done(answer) => {
+                                println!("\n{}", answer);
+                                return Ok(());
+                            }
+                            AgentDecision::Inconclusive(retry_output) => {
+                                report_inconclusive_after_guardrail_failure(&reason, &retry_output);
+                            }
+                        }
+                    }
+                }
             }
             AgentDecision::Done(answer) => {
                 println!("\n{}", answer);
                 return Ok(());
             }
+            AgentDecision::Inconclusive(output) => {
+                // Model failed to produce a tool call or complete the task
+                eprintln!("\n⚠️  Model produced inconclusive output:");
+                eprintln!("   \"{}\"", output.lines().next().unwrap_or(&output));
+                eprintln!("\n   Attempting corrective retry with stricter instructions...\n");
+
+                // Corrective retry: re-prompt with explicit tool requirement
+                let corrective_prompt = before_llm_call(&state, tool_used, true);
+
+                let retry_output = llm_backend.infer(LLMInput {
+                    prompt: corrective_prompt,
+                    max_tokens: args.max_tokens,
+                    current_pos,
+                    first_generation: false,
+                })?;
+
+                current_pos += retry_output.tokens_processed;
+
+                // Process retry output
+                match process_model_output(&mut state, retry_output.text) {
+                    AgentDecision::InvokeTool(tool_request) => {
+                        // Success - execute tool
+                        let result = execute_tool(&tool_request)?;
+                        apply_tool_result(&mut state, &result);
+                        after_tool_execution(&mut state, &result);
+                        tool_used = true;
+                    }
+                    AgentDecision::Done(answer) => {
+                        println!("\n{}", answer);
+                        return Ok(());
+                    }
+                    AgentDecision::Inconclusive(retry_output) => {
+                        // Still inconclusive after retry - fail loudly
+                        eprintln!("\n❌ ERROR: Model failed to produce a valid response after retry.\n");
+                        eprintln!("Original output: \"{}\"", output.lines().next().unwrap_or(&output));
+                        eprintln!("Retry output:    \"{}\"", retry_output.lines().next().unwrap_or(&retry_output));
+                        eprintln!("\nThe model did not invoke a tool or provide a complete answer.");
+                        eprintln!("This is common with small models (3-4B parameters).");
+                        eprintln!("\nSuggestions:");
+                        eprintln!("  - Use a larger model (7B+ parameters)");
+                        eprintln!("  - Use a model specifically tuned for tool use");
+                        eprintln!("  - Simplify the query");
+
+                        std::process::exit(1);
+                    }
+                }
+            }
         }
     }
 
-    println!("\nWarning: Agent reached maximum iterations without completing.");
-    Ok(())
+    eprintln!("\n⚠️  Warning: Agent reached maximum iterations without completing.");
+    std::process::exit(1)
 }
 
 /// Lifecycle callback: before_llm_call
 /// Constructs the prompt and injects response schema if tools have been used
-fn before_llm_call(state: &AgentState, tool_used: bool) -> String {
+/// If `corrective` is true, adds stricter instructions for tool invocation
+fn before_llm_call(state: &AgentState, tool_used: bool, corrective: bool) -> String {
     let mut prompt = String::new();
 
     // Add system prompt
@@ -161,6 +268,26 @@ fn before_llm_call(state: &AgentState, tool_used: bool) -> String {
         prompt.push_str("\n\n");
     }
 
+    // Add corrective instruction if this is a retry
+    // This prompt addresses common LLM failures: reasoning instead of action,
+    // and generating commands that produce unusable outputs (headers, summaries).
+    if corrective {
+        prompt.push_str("CRITICAL: You MUST call a tool to complete this task.\n");
+        prompt.push_str("Respond ONLY with valid JSON in the exact format shown above.\n");
+        prompt.push_str("Do NOT explain what you will do. Do NOT use plain text. Output JSON only.\n\n");
+
+        prompt.push_str("IMPORTANT: The tool command must directly produce the final answer.\n");
+        prompt.push_str("Avoid commands that output headers, summaries, or non-answer lines.\n");
+        prompt.push_str("The tool output should be the actual data requested, not metadata about it.\n\n");
+
+        // NOTE: Semantic guardrails validate tool outputs at runtime.
+        // TODO: Future enhancement - Tool-defined postconditions
+        //
+        // Tools should optionally declare explicit semantic contracts (postconditions)
+        // that replace heuristic guardrails. This aligns with agent.cpp's callback
+        // extensibility and any-guardrail's pluggable validation model.
+    }
+
     prompt.push_str("Assistant: ");
     prompt
 }
@@ -173,94 +300,74 @@ fn after_tool_execution(_state: &mut AgentState, tool_result: &ToolResult) {
     let _ = tool_result; // Suppress unused warning
 }
 
-/// Generate text from the model
-fn generate(
-    model: &LlamaModel,
-    ctx: &mut llama_cpp_2::context::LlamaContext,
-    prompt: &str,
-    max_tokens: usize,
-    current_pos: i32,
-    suppress_stderr: bool,
-) -> Result<(String, i32)> {
-    // Suppress stderr during first decode (Metal shader compilation logs)
-    let _stderr_redirect = if suppress_stderr {
-        Some(suppress_stderr_temporarily())
-    } else {
-        None
-    };
+/// Report guardrail failure to user with structured output
+///
+/// Event: AgentFailedAfterGuardrails
+/// Triggered when the agent fails after guardrails reject both initial and retry attempts.
+fn report_guardrail_failure(initial_reason: &str, retry_reason: &str) -> ! {
+    let message = format!(
+        r#"
+❌ TASK FAILED: Agent could not produce valid output
 
-    // Tokenize prompt
-    let tokens = model
-        .str_to_token(prompt, AddBos::Always)
-        .context("Failed to tokenize prompt")?;
+What happened:
+  • The agent attempted to complete your task
+  • Tool commands were executed successfully
+  • However, the tool outputs were semantically invalid
+  • A corrective retry was attempted
+  • The retry also produced invalid output
 
-    // Create batch with size based on prompt length + generation headroom
-    let batch_size = (tokens.len() + max_tokens).max(512);
-    let mut batch = LlamaBatch::new(batch_size, 1);
-    for (i, token) in tokens.iter().enumerate() {
-        let is_last = i == tokens.len() - 1;
-        batch.add(*token, current_pos + i as i32, &[0], is_last)?;
-    }
+Validation failures:
+  Initial attempt: {}
+  Retry attempt:   {}
 
-    // Decode the prompt
-    ctx.decode(&mut batch)
-        .context("Failed to decode batch")?;
+Why this happened:
+  This model lacks sufficient tool-reasoning capability for this task.
+  The system refused to return incorrect results (this is by design).
 
-    // Generate tokens
-    let mut result = String::new();
-    let mut n_generated = 0;
-    let prompt_len = tokens.len() as i32;
+What you can do:
+  • Use a larger model (7B+ parameters recommended)
+  • Use a model specifically fine-tuned for tool use
+  • Simplify the query to reduce reasoning complexity
+  • Verify the task is achievable with available tools
 
-    while n_generated < max_tokens {
-        // Get token candidates and sample greedily
-        let candidates = ctx.candidates();
-        let mut candidates_array = LlamaTokenDataArray::from_iter(candidates, false);
+Note: A correct system that fails honestly is better than one that
+      returns plausible-looking but incorrect results.
+"#,
+        initial_reason, retry_reason
+    );
 
-        // Select token with highest probability (greedy sampling)
-        candidates_array.sample_token_greedy();
-        let token = match candidates_array.selected_token() {
-            Some(t) => t,
-            None => break, // No token selected, end generation
-        };
+    eprintln!("{}", message);
+    std::process::exit(1);
+}
 
-        // Check for EOS
-        if model.is_eog_token(token) {
-            break;
-        }
+/// Report model failure to produce tool call after guardrail rejection
+fn report_inconclusive_after_guardrail_failure(guardrail_reason: &str, model_output: &str) -> ! {
+    let message = format!(
+        r#"
+❌ TASK FAILED: Model could not recover from validation failure
 
-        // Decode token
-        if let Ok(piece) = model.token_to_str(token, Special::Tokenize) {
-            result.push_str(&piece);
-        }
+What happened:
+  • A tool was executed but its output was rejected by validation
+  • Guardrail rejection: {}
+  • A corrective retry was attempted
+  • The model failed to produce a valid tool call
+  • Model output: "{}"
 
-        // Prepare next batch
-        batch.clear();
-        batch.add(token, current_pos + prompt_len + n_generated as i32, &[0], true)?;
+Why this happened:
+  The model cannot adjust its approach in response to validation feedback.
+  This indicates insufficient tool-reasoning capability.
 
-        ctx.decode(&mut batch)
-            .context("Failed to decode batch")?;
+What you can do:
+  • Use a larger model (7B+ parameters recommended)
+  • Use a model specifically fine-tuned for tool use
+  • Simplify the query
+"#,
+        guardrail_reason,
+        model_output.lines().next().unwrap_or(model_output)
+    );
 
-        n_generated += 1;
-
-        // Early stopping heuristics
-        if result.trim().starts_with('{') {
-            // For JSON tool calls: stop when we have valid complete JSON
-            if result.contains('}') {
-                if let Ok(_) = serde_json::from_str::<serde_json::Value>(result.trim()) {
-                    break;
-                }
-            }
-        } else {
-            // For text responses: stop when we see natural ending patterns
-            // Check for double newline after sentence (paragraph break)
-            if result.contains("\n\n") && (result.trim_end().ends_with('.') || result.trim_end().ends_with('!') || result.trim_end().ends_with('?')) {
-                break;
-            }
-        }
-    }
-
-    // Return generated text and total tokens processed (prompt + generated)
-    Ok((result.trim().to_string(), prompt_len + n_generated as i32))
+    eprintln!("{}", message);
+    std::process::exit(1);
 }
 
 /// Execute a tool request
@@ -320,35 +427,5 @@ fn execute_shell_tool(request: &ToolRequest) -> Result<ToolResult> {
 
         println!("  ✗ {}\n", error);
         Ok(ToolResult::failure(error))
-    }
-}
-
-/// Temporarily suppress stderr (for Metal shader compilation logs)
-fn suppress_stderr_temporarily() -> impl Drop {
-    use std::fs::OpenOptions;
-    use std::os::unix::io::FromRawFd;
-
-    struct StderrRedirect {
-        old_stderr: i32,
-    }
-
-    impl Drop for StderrRedirect {
-        fn drop(&mut self) {
-            unsafe {
-                libc::dup2(self.old_stderr, 2);
-                libc::close(self.old_stderr);
-            }
-        }
-    }
-
-    unsafe {
-        let old_stderr = libc::dup(2);
-        let devnull = OpenOptions::new()
-            .write(true)
-            .open("/dev/null")
-            .expect("Failed to open /dev/null");
-        libc::dup2(devnull.as_raw_fd(), 2);
-
-        StderrRedirect { old_stderr }
     }
 }

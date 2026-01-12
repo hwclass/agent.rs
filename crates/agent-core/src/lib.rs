@@ -12,10 +12,12 @@
 #![forbid(unsafe_code)]
 
 pub mod agent;
+pub mod guardrail;
 pub mod protocol;
 pub mod tool;
 
 // Re-export commonly used types
 pub use agent::{AgentDecision, AgentState, Message, Role};
+pub use guardrail::{GuardrailChain, GuardrailContext, GuardrailResult, PlausibilityGuard, SemanticGuardrail};
 pub use protocol::{parse_model_output, ParseResult};
 pub use tool::{ToolRequest, ToolResult};

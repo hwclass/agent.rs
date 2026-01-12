@@ -3,7 +3,11 @@
 	check check-deps \
 	build build-core build-wasm build-native \
 	test test-core test-wasm test-native \
-	wasm demo clean help
+	wasm demo demo-shell demo-browser demo-edge serve-docs clean help
+
+# Load .env file if it exists (for environment variables)
+-include .env
+export
 
 # -----------------------------
 # Default target
@@ -83,21 +87,82 @@ wasm: build-wasm
 	@echo "  target/wasm32-unknown-unknown/release/agent_wasm.wasm"
 
 # -----------------------------
-# Demo
+# Examples / Demos
 # -----------------------------
+
+# Default demo (backwards compatibility)
 demo:
+	@echo "Available demos:"
+	@echo "  make demo-shell     Native CLI with llama.cpp (requires MODEL_PATH)"
+	@echo "  make demo-browser   Browser with WebLLM (local-first)"
+	@echo "  make demo-edge      Edge runtime with Deno (requires LLM_ENDPOINT)"
+	@echo ""
+
+# Shell/Native demo (original demo target)
+demo-shell:
 ifndef MODEL_PATH
 	@echo "❌ Error: MODEL_PATH not set"
 	@echo ""
 	@echo "Usage:"
-	@echo "  make demo MODEL_PATH=/path/to/model.gguf"
+	@echo "  make demo-shell MODEL_PATH=/path/to/model.gguf"
+	@echo ""
+	@echo "Or configure in .env file:"
+	@echo "  cp .env.example .env"
+	@echo "  # Edit .env and set MODEL_PATH=/path/to/model.gguf"
+	@echo "  make demo-shell"
 	@echo ""
 	@exit 1
 endif
-	@echo "Running agent-native demo..."
+	@echo "Running agent-native demo (shell)..."
 	./target/release/agent-native \
 		--model $(MODEL_PATH) \
 		--query "List the files in this directory and show disk usage"
+
+# Browser demo
+demo-browser:
+	@echo "🔧 Preparing browser example..."
+	@cd examples/browser && ./build-wasm.sh
+	@echo ""
+	@echo "🚀 Starting dev server..."
+	@echo "   Open http://localhost:8080 in your browser"
+	@echo ""
+	@cd examples/browser && ./run-dev.sh
+
+# Edge demo (Deno)
+demo-edge:
+	@echo "🔧 Preparing edge example..."
+	@cd examples/edge && ./build-wasm.sh
+	@echo ""
+ifndef LLM_ENDPOINT
+	@echo "⚠️  Warning: LLM_ENDPOINT not set"
+	@echo ""
+	@echo "Configure in .env file (recommended):"
+	@echo "  cp .env.example .env"
+	@echo "  # Edit .env and set LLM_ENDPOINT, LLM_API_KEY, LLM_MODEL"
+	@echo "  make demo-edge"
+	@echo ""
+	@echo "Or export environment variables:"
+	@echo "  export LLM_ENDPOINT='https://api.openai.com/v1/chat/completions'"
+	@echo "  export LLM_API_KEY='sk-...'"
+	@echo "  export LLM_MODEL='gpt-3.5-turbo'"
+	@echo ""
+	@echo "Starting server anyway (will fail on first request without config)..."
+	@echo ""
+endif
+	@echo "🚀 Starting Deno edge server..."
+	@echo "   Server will listen on http://localhost:8000"
+	@echo "   Send POST requests with: {\"query\": \"your query\"}"
+	@echo ""
+	@cd examples/edge && deno task start
+
+# Documentation
+serve-docs:
+	@echo "📚 Starting local server for GitHub Pages..."
+	@echo "   Open http://localhost:3000 in your browser"
+	@echo ""
+	@command -v python3 >/dev/null 2>&1 && \
+		cd docs && python3 -m http.server 3000 || \
+		{ echo "❌ Python 3 not found. Install Python or use another HTTP server."; exit 1; }
 
 # -----------------------------
 # Quick check (no build)
@@ -134,9 +199,17 @@ help:
 	@echo "  make test-wasm"
 	@echo "  make test-native"
 	@echo ""
+	@echo "Examples/Demos:"
+	@echo "  make demo          Show available demos"
+	@echo "  make demo-shell    Native CLI (requires MODEL_PATH)"
+	@echo "  make demo-browser  Browser with WebLLM"
+	@echo "  make demo-edge     Edge runtime (requires LLM_ENDPOINT)"
+	@echo ""
+	@echo "Documentation:"
+	@echo "  make serve-docs    Run GitHub Pages site locally (port 3000)"
+	@echo ""
 	@echo "Other:"
 	@echo "  make wasm          Build WASM artifact"
-	@echo "  make demo MODEL_PATH=..."
 	@echo "  make check         Cargo check only"
 	@echo "  make clean"
 	@echo "  make help"

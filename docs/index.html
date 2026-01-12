@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>agent.rs - Correctness-First Agent Framework</title>
-  <meta name="description" content="A host-agnostic, correctness-first agent framework written in Rust. Same agent logic runs unchanged across native, browser, and edge environments.">
+  <meta name="description" content="A host-agnostic, correctness-first agent architecture written in Rust. Same agent logic runs unchanged across native, browser, and edge environments.">
   <link rel="stylesheet" href="style.css">
   <link rel="icon" type="image/png" href="logo.png">
 </head>
@@ -33,7 +33,7 @@
     </h1>
 
     <p class="hero-lead">
-      <strong>agent.rs</strong> is a host-agnostic, correctness-first agent framework
+      <strong>agent.rs</strong> is a host-agnostic, correctness-first agent architecture
       written in Rust, designed to run unchanged across native, browser, and edge
       environments using WebAssembly.
     </p>
@@ -80,23 +80,29 @@
         </div>
 
         <div class="principle">
-          <h3>2. Same Agent, Multiple Hosts</h3>
-          <p>The same <code>agent-core</code> runs across environments without modification.</p>
-        </div>
-
-        <div class="principle">
-          <h3>3. Explicit Failure Semantics</h3>
+          <h3>2. What's Identical Across All Three Hosts</h3>
+          <p>In all three environments:</p>
           <ul>
-            <li>No silent success</li>
-            <li>No hallucinated correctness</li>
-            <li>Guardrails reject invalid outputs by design</li>
+            <li>✅ The agent logic is identical</li>
+            <li>✅ The tool invocation protocol is identical</li>
+            <li>✅ The guardrails and failure semantics are identical</li>
           </ul>
         </div>
 
         <div class="principle">
-          <h3>4. WASM as a State Transition Engine</h3>
+          <h3>3. Explicit Failure, Not Silent Fallback</h3>
           <ul>
-            <li>Agent logic is pure</li>
+            <li>No silent success</li>
+            <li>No hallucinated correctness</li>
+            <li>Guardrails enforce correctness by design</li>
+          </ul>
+        </div>
+
+        <div class="principle">
+          <h3>4. Pure State Transition Engine</h3>
+          <ul>
+            <li>agent-core has zero platform dependencies</li>
+            <li>Native runs Rust directly; Browser and Edge use WebAssembly</li>
             <li>Deterministic state → decision transitions</li>
             <li>Side effects handled exclusively by the host</li>
           </ul>
@@ -162,12 +168,11 @@
         </div>
 
         <div class="shared-features">
-          <p><strong>All hosts share:</strong></p>
+          <p><strong>The host provides capabilities. The agent provides decisions.</strong></p>
           <ul>
-            <li>agent-core logic</li>
-            <li>identical guardrails</li>
-            <li>identical tool invocation rules</li>
-            <li>identical failure semantics</li>
+            <li>Same agent-core logic across all environments</li>
+            <li>Identical guardrails and failure semantics</li>
+            <li>Identical tool invocation protocol</li>
           </ul>
         </div>
       </div>

@@ -1,19 +1,50 @@
-# agent.rs
+<p align="center">
+  <img src="docs/agent-rs-logo.png" alt="agent.rs logo" width="420">
+</p>
 
-**A proof-of-concept local LLM agent inspired by Mozilla's agent.cpp**
+<p align="center">
+  <strong>A host-agnostic, correctness-first agent architecture written in Rust</strong>
+</p>
 
-This project demonstrates core agent loop semantics: a local GGUF model that invokes tools in a loop until it reaches a final answer. Built with architectural clarity as the primary goal.
+This project demonstrates a portable agent architecture where the same core logic runs unchanged across native (CLI), browser (WebLLM), and edge (Deno) environments. The agent invokes tools in a loop, validates outputs with semantic guardrails, and fails explicitly rather than returning plausible-looking but incorrect results.
+
+📚 **[View Documentation](https://hwclass.github.io/agent.rs/)** • Inspired by [Mozilla's agent.cpp](https://github.com/Mozilla-Ocho/llamafile/tree/main/agent.cpp)
+
+## Who Should Explore This?
+
+If you're interested in:
+- **Portable agent architectures** - Same logic across native, web, and serverless
+- **Correctness-first decision systems** - Explicit failure over silent incorrectness
+- **Web and serverless agent execution** - Browser (WebLLM) and edge (Deno) deployments
+- **Rust + WASM for dependable tooling** - Type-safe, sandboxed agent logic
+
+This reference implementation demonstrates the core patterns.
 
 ## Architecture
 
 ### Design Principles
 
-This is **agent.cpp-inspired, not a clone**. Key differences:
+**One Agent, Three Hosts**
 
-- **Uses Rust llama.cpp bindings** (not vendored C++ submodule)
-- **Agent logic is WASM-portable** (LLM inference stays native)
-- **Library-first design** (pure core + platform-specific implementations)
-- **Single tool demo** (shell with human approval)
+The same `agent-core` logic runs unchanged across:
+- **Native (CLI)** - Local inference with llama.cpp, shell tools
+- **Browser** - WebLLM for client-side inference, DOM + fetch tools
+- **Edge** - Deno runtime with HTTP-based LLMs, stateless execution
+
+**What's Identical Across All Three Hosts:**
+
+In all three environments:
+- ✅ The agent logic is identical
+- ✅ The tool invocation protocol is identical
+- ✅ The guardrails and failure semantics are identical
+
+**Key Architectural Decisions:**
+
+- **The host provides capabilities. The agent provides decisions.**
+- **Correctness over convenience** - Explicit failure, not silent fallback
+- **Pure state transition engine** - agent-core has zero platform dependencies
+- **WASM portability** - Native runs Rust directly; Browser and Edge use WebAssembly
+- **No silent failures** - Guardrails enforce correctness by design
 
 ### Crate Structure
 
@@ -23,6 +54,11 @@ agent-rs/
 │   ├── agent-core/       # Pure Rust, WASM-compatible agent logic
 │   ├── agent-native/     # CLI demo with llama.cpp
 │   └── agent-wasm/       # WASM compilation target
+├── examples/
+│   ├── shell/            # Native CLI example with shell tool
+│   ├── browser/          # Browser demo with WebLLM
+│   └── edge/             # Deno edge runtime demo
+└── docs/                 # GitHub Pages documentation site
 ```
 
 #### agent-core
@@ -70,30 +106,40 @@ The model invokes tools via JSON:
 
 ## Quick Start
 
+> **Choose your demo:** Native (local models), Browser (WebLLM), or Edge (Deno)
+
 ### Prerequisites
 
-- **Rust 1.75+**
-- **C/C++ compiler** (clang or gcc)
-- **CMake** (required by llama-cpp-2 bindings)
-- **macOS**: Xcode Command Line Tools (`xcode-select --install`)
-- **Linux**: `build-essential` package
+**For Native Demo (CLI):**
+- Rust 1.75+
+- C/C++ compiler (clang or gcc)
+- CMake (required by llama-cpp-2 bindings)
 
-### Step-by-Step Setup
+**For Browser Demo:**
+- Node.js 20.19+ or 22.12+
+- Modern browser (Chrome, Firefox, Edge)
+- No API keys required (runs locally with WebLLM)
 
-**1. Install CMake**
+**For Edge Demo:**
+- Deno 1.37+
+- LLM API access (OpenAI, Anthropic, or compatible endpoint)
+
+### Setup (Native Demo)
+
+**1. Install Dependencies**
 
 ```bash
 # macOS
 brew install cmake
 
 # Ubuntu/Debian
-sudo apt install cmake
+sudo apt install cmake build-essential
 
 # Arch
-sudo pacman -S cmake
+sudo pacman -S cmake base-devel
 ```
 
-**2. Download a GGUF Model**
+**2. Download a GGUF Model (for native demo only)**
 
 ```bash
 # Recommended: Granite 4.0 Micro (compact, fast)
@@ -130,21 +176,26 @@ The setup script will:
 - Build all crates
 - Run tests
 
-**5. Run the Demo**
+**5. Run a Demo**
 
 ```bash
-# Option 1: Direct command
-./target/release/agent-native \
-  --model ./granite-4.0-micro-Q8_0.gguf \
-  --query "List files and show disk usage"
-
-# Option 2: Using make (reads MODEL_PATH from .env)
+# Native demo (requires model downloaded)
 make demo-shell
 
-# Run other demos
-make demo           # Show all available demos
-make demo-browser   # Browser demo with WebLLM
-make demo-edge      # Edge demo with Deno
+# Browser demo (no model needed - uses WebLLM)
+make demo-browser
+# Opens http://localhost:8080 in your browser
+
+# Edge demo (requires LLM_ENDPOINT in .env)
+make demo-edge
+# Starts server on http://localhost:8000
+
+# View all available demos
+make demo
+
+# View documentation site locally
+make serve-docs
+# Opens http://localhost:3000
 ```
 
 ### Example Session
@@ -423,11 +474,52 @@ Larger models work better but are slower. For a quick demo, use the smallest ins
 
 ## Examples
 
-Complete working examples are available in the [examples/](examples/) directory:
+Complete working examples demonstrating the three host environments:
 
-- **[examples/shell/](examples/shell/)** - CLI shell tool demo with human-in-the-loop approval
-- **[examples/browser/](examples/browser/)** - Minimal browser host with WebLLM local inference and real browser tools
-- **[examples/edge/](examples/edge/)** - Stateless edge runtime (Deno) with HTTP-based LLM and fetch_url tool
+### [examples/shell/](examples/shell/) - Native (CLI) Host
+- **LLM:** llama.cpp (local GGUF models)
+- **Tools:** `shell` with human-in-the-loop approval
+- **Runtime:** Native Rust binary
+- **Demo:** `make demo-shell`
+
+**Key features:**
+- Human approval required for shell commands
+- Semantic guardrails validate tool outputs
+- Explicit failure on invalid results
+- Local inference with no API dependencies
+
+**Example:**
+```bash
+./target/release/agent-native \
+  --model ./granite-4.0-micro-Q8_0.gguf \
+  --query "List files and show disk usage"
+```
+
+See [examples/shell/README.md](examples/shell/README.md) for detailed documentation.
+
+### [examples/browser/](examples/browser/) - Browser Host
+- **LLM:** WebLLM (runs entirely in browser, no API keys)
+- **Tools:** `read_dom`, `fetch_url` (with CORS proxy fallback)
+- **Runtime:** Vite dev server, WASM agent
+- **Demo:** `make demo-browser` → http://localhost:8080
+
+**Key features:**
+- Automatic Node.js version management (via nvm)
+- Local-first inference with Qwen2.5-3B-Instruct
+- Real browser tools (DOM queries, HTTP fetch)
+- Semantic guardrails validate tool outputs
+
+### [examples/edge/](examples/edge/) - Edge Runtime Host
+- **LLM:** HTTP-based (OpenAI, Anthropic, or compatible)
+- **Tools:** `fetch_url` only (stateless)
+- **Runtime:** Deno with minimal dependencies
+- **Demo:** `make demo-edge` → http://localhost:8000
+
+**Key features:**
+- Stateless agent execution
+- Configurable via `.env` file
+- Semantic guardrails prevent empty/invalid responses
+- RESTful API interface
 
 ## Extending the Demo
 
@@ -532,6 +624,16 @@ A system that:
 
 ...is fundamentally more trustworthy than one that always returns plausible-looking output.
 
+## Documentation
+
+The full documentation site is available at **[https://hwclass.github.io/agent.rs/](https://hwclass.github.io/agent.rs/)**
+
+To preview the documentation locally:
+```bash
+make serve-docs
+# Opens http://localhost:3000
+```
+
 ## License
 
 MIT OR Apache-2.0
@@ -561,7 +663,15 @@ No. This is a **proof-of-concept** demonstrating core concepts. It lacks:
 
 ### Can I use this with OpenAI/Claude/etc?
 
-Yes! The agent-core logic is backend-agnostic. Replace the llama.cpp inference in agent-native with API calls to any LLM provider. The tool protocol and agent loop remain the same.
+Yes! The agent-core logic is backend-agnostic. The **edge demo** (`examples/edge/`) already supports any OpenAI-compatible API. Configure `LLM_ENDPOINT`, `LLM_API_KEY`, and `LLM_MODEL` in your `.env` file.
+
+### What makes this different from other agent frameworks?
+
+**Three key differences:**
+
+1. **Host-agnostic architecture** - Same agent logic runs in CLI, browser, and edge environments
+2. **Correctness-first** - Semantic guardrails validate tool outputs; explicit failure over silent incorrectness
+3. **WASM portability** - Agent decision logic compiles to WebAssembly, separating intelligence from inference
 
 ### How does this compare to LangChain/AutoGPT/etc?
 
@@ -573,3 +683,7 @@ This is **architecturally minimal**:
 - Just: loop → tool → loop
 
 It's meant to demonstrate **the core pattern**, not provide a full agent framework.
+
+### Do I need to download models for the browser demo?
+
+No! The browser demo uses [WebLLM](https://webllm.mlc.ai/) which downloads and runs models entirely in your browser. No API keys or backend servers required.

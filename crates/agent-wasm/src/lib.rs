@@ -40,6 +40,12 @@ pub enum DecisionOutput {
         params: serde_json::Value,
     },
 
+    /// Invoke a skill
+    InvokeSkill {
+        skill: String,
+        params: serde_json::Value,
+    },
+
     /// Agent is done
     Done { answer: String },
 
@@ -82,6 +88,10 @@ pub fn run_agent_step(input_json: &str) -> Result<String, JsValue> {
     let decision_output = match decision {
         agent_core::AgentDecision::InvokeTool(req) => DecisionOutput::InvokeTool {
             tool: req.tool,
+            params: req.params,
+        },
+        agent_core::AgentDecision::InvokeSkill(req) => DecisionOutput::InvokeSkill {
+            skill: req.skill,
             params: req.params,
         },
         agent_core::AgentDecision::Done(answer) => DecisionOutput::Done { answer },

@@ -1,4 +1,5 @@
 use crate::protocol::{parse_model_output, ParseResult};
+use crate::skill::SkillRequest;
 use crate::tool::{ToolRequest, ToolResult};
 use serde::{Deserialize, Serialize};
 
@@ -59,6 +60,10 @@ pub enum AgentDecision {
     /// The agent wants to invoke a tool
     InvokeTool(ToolRequest),
 
+    /// The agent wants to invoke a skill
+    /// Skills are contract-based, guardrail-enforced operations
+    InvokeSkill(SkillRequest),
+
     /// The agent has produced a final answer
     Done(String),
 
@@ -71,7 +76,7 @@ pub enum AgentDecision {
 ///
 /// This is the core agent loop logic:
 /// 1. Parse the model output
-/// 2. Decide if it's a tool call, final answer, or inconclusive
+/// 2. Decide if it's a tool call, skill invocation, final answer, or inconclusive
 /// 3. Return the appropriate decision
 ///
 /// This function is pure, deterministic, and has no side effects.
@@ -86,6 +91,11 @@ pub fn process_model_output(
             // Add the model's tool call to history
             state.add_message(Role::Assistant, output);
             AgentDecision::InvokeTool(tool_request)
+        }
+        ParseResult::SkillCall(skill_request) => {
+            // Add the model's skill invocation to history
+            state.add_message(Role::Assistant, output);
+            AgentDecision::InvokeSkill(skill_request)
         }
         ParseResult::FinalAnswer(answer) => {
             // Add the final answer to history

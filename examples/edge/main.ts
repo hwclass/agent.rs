@@ -20,6 +20,7 @@ interface AgentWasm {
 
 type AgentDecision =
   | { type: 'invoke_tool'; tool: string; params: Record<string, unknown> }
+  | { type: 'invoke_skill'; skill: string; params: Record<string, unknown> }
   | { type: 'done'; answer: string }
   | { type: 'inconclusive'; output: string };
 
@@ -142,6 +143,100 @@ async function executeTool(
 }
 
 /**
+ * Execute extraction skill
+ */
+async function executeSkill(
+  skill: string,
+  params: Record<string, unknown>,
+  config: Config
+): Promise<{ success: boolean; output: string; error?: string }> {
+  try {
+    if (skill !== 'extract') {
+      throw new Error(`Unknown skill: ${skill}`);
+    }
+
+    const text = params.text as string;
+    const target = params.target as string;
+    if (!text) throw new Error('Missing text parameter');
+    if (!target) throw new Error('Missing target parameter');
+
+    // Validate target
+    const validTargets = ['email', 'url', 'date', 'entity', 'name'];
+    if (!validTargets.includes(target)) {
+      throw new Error(`InvalidTarget: ${target}. Must be one of: ${validTargets.join(', ')}`);
+    }
+
+    // Call LLM to extract
+    const extractPrompt = buildExtractionPrompt(text, target);
+    const llmOutput = await callLLM(config, extractPrompt);
+
+    // Parse and validate output
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(llmOutput.trim());
+    } catch {
+      throw new Error(`MalformedOutput: LLM returned invalid JSON: ${llmOutput}`);
+    }
+
+    // Check target field exists
+    if (!(target in parsed)) {
+      throw new Error(`SchemaViolation: output missing '${target}' field`);
+    }
+
+    // Anti-hallucination check
+    const values = Array.isArray(parsed[target]) ? parsed[target] : [parsed[target]];
+    const textLower = text.toLowerCase();
+    for (const val of values as unknown[]) {
+      if (typeof val === 'string' && val.length > 0) {
+        if (!textLower.includes(val.toLowerCase())) {
+          throw new Error(`HallucinationDetected: '${val}' not found in source text`);
+        }
+      }
+    }
+
+    return { success: true, output: JSON.stringify(parsed) };
+  } catch (error) {
+    return {
+      success: false,
+      output: '',
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Build extraction prompt for skill
+ */
+function buildExtractionPrompt(text: string, target: string): string {
+  const targetDesc: Record<string, string> = {
+    email: 'email addresses',
+    url: 'URLs',
+    date: 'dates (in ISO format YYYY-MM-DD)',
+    entity: 'named entities (people, organizations, locations)',
+    name: 'person names (first name, last name, full names)',
+  };
+
+  const outputFormat =
+    target === 'entity'
+      ? '{"entity": {"people": [...], "organizations": [...], "locations": [...]}}'
+      : `{"${target}": [...]}`;
+
+  return `Extract ${targetDesc[target]} from the following text.
+
+IMPORTANT:
+- Output ONLY valid JSON
+- Only include values that ACTUALLY APPEAR in the text
+- Do NOT invent or hallucinate values
+- If no matches found, return an empty array
+
+Text: "${text}"
+
+Output format: ${outputFormat}
+
+JSON output:`;
+}
+
+/**
  * Validate tool output with guardrails (same logic as native/browser)
  */
 function validateOutput(output: string): { accept: boolean; reason?: string } {
@@ -178,27 +273,34 @@ async function runAgent(query: string, config: Config): Promise<Response> {
   // Create agent state
   const stateJson = wasm.create_agent_state(query);
 
-  // System prompt with tool obligations
-  const systemPrompt = `You are an agent with tools:
+  // System prompt with tool and skill obligations
+  const systemPrompt = `You are an agent with tools and skills:
+
+TOOLS (for environment access):
 - fetch_url: {"tool":"fetch_url","url":"https://httpbin.org/json"}
+
+SKILLS (for structured extraction):
+- extract: {"skill":"extract","text":"Contact hello@test.com","target":"email"}
+  Supported targets: email, url, date, entity, name
 
 CRITICAL RULES:
 1. If a task requires fetching data from EXTERNAL URLs, you MUST invoke fetch_url.
-2. If a task can be answered with your own knowledge (math, general facts), answer DIRECTLY without tools.
-3. Do NOT explain what tool should be used.
-4. Do NOT describe how to solve the task.
+2. If a task requires extracting structured data from text, use the extract skill.
+3. If a task can be answered with your own knowledge (math, general facts), answer DIRECTLY without tools.
+4. Do NOT explain what tool/skill should be used.
+5. Do NOT describe how to solve the task.
 
 Examples:
 User: Fetch data from https://api.example.com
 Assistant: {"tool":"fetch_url","url":"https://api.example.com"}
 
+User: Extract emails from "Contact us at hello@agent.rs"
+Assistant: {"skill":"extract","text":"Contact us at hello@agent.rs","target":"email"}
+
 User: What is 2 + 2?
 Assistant: 4
 
-User: What is the capital of France?
-Assistant: Paris
-
-Respond with JSON to use a tool, or plain text to answer directly.`;
+Respond with JSON to use a tool/skill, or plain text to answer directly.`;
 
   const userPrompt = `${systemPrompt}\n\nUser: ${query}\n\nAssistant:`;
 
@@ -211,7 +313,40 @@ Respond with JSON to use a tool, or plain text to answer directly.`;
   const decision: AgentDecision = stepOutput.decision;
 
   // Handle decision
-  if (decision.type === 'invoke_tool') {
+  if (decision.type === 'invoke_skill') {
+    // Execute skill
+    const result = await executeSkill(decision.skill, decision.params, config);
+
+    if (result.success) {
+      return new Response(
+        JSON.stringify({
+          result: JSON.parse(result.output),
+          host: 'edge',
+          model: config.llmModel,
+          skill: decision.skill,
+          guardrail: 'accept',
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    } else {
+      return new Response(
+        JSON.stringify({
+          error: 'Skill execution failed',
+          details: result.error,
+          host: 'edge',
+          skill: decision.skill,
+          guardrail: 'reject',
+        }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+  } else if (decision.type === 'invoke_tool') {
     // Execute tool
     const result = await executeTool(decision.tool, decision.params);
 
@@ -290,6 +425,73 @@ Respond with JSON to use a tool, or plain text to answer directly.`;
 }
 
 /**
+ * Handle direct skill invocation (bypasses agent loop)
+ */
+async function handleExtractRequest(
+  body: Record<string, unknown>,
+  config: Config
+): Promise<Response> {
+  const text = body.text as string | undefined;
+  const target = body.target as string | undefined;
+
+  if (!text || !target) {
+    return new Response(
+      JSON.stringify({
+        error: 'Missing required fields',
+        details: 'Both "text" and "target" are required for the extract skill',
+      }),
+      {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
+  const result = await executeSkill(
+    'extract',
+    { text, target },
+    config
+  );
+
+  if (result.success) {
+    let parsedResult: unknown = result.output;
+    try {
+      parsedResult = JSON.parse(result.output);
+    } catch {
+      // If parsing fails, fall back to raw string
+    }
+
+    return new Response(
+      JSON.stringify({
+        result: parsedResult,
+        host: 'edge',
+        model: config.llmModel,
+        skill: 'extract',
+        guardrail: 'accept',
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
+  return new Response(
+    JSON.stringify({
+      error: 'Skill execution failed',
+      details: result.error,
+      host: 'edge',
+      skill: 'extract',
+      guardrail: 'reject',
+    }),
+    {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    }
+  );
+}
+
+/**
  * HTTP request handler
  */
 async function handler(req: Request): Promise<Response> {
@@ -304,8 +506,34 @@ async function handler(req: Request): Promise<Response> {
     );
   }
 
+  let body: Record<string, unknown>;
   try {
-    const body = await req.json();
+    body = await req.json();
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Unable to parse JSON body';
+    return new Response(
+      JSON.stringify({
+        error: 'Invalid JSON payload',
+        details: message,
+      }),
+      {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
+  const url = new URL(req.url);
+
+  try {
+    const config = getConfig();
+    const skill = body.skill as string | undefined;
+
+    if (url.pathname === '/skill/extract' || skill === 'extract') {
+      return await handleExtractRequest(body, config);
+    }
+
     const query = body.query as string;
 
     if (!query) {
@@ -318,7 +546,6 @@ async function handler(req: Request): Promise<Response> {
       );
     }
 
-    const config = getConfig();
     return await runAgent(query, config);
   } catch (error) {
     console.error('Request error:', error);

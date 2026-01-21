@@ -54,10 +54,13 @@ agent-rs/
 │   ├── agent-core/       # Pure Rust, WASM-compatible agent logic
 │   ├── agent-native/     # CLI demo with llama.cpp
 │   └── agent-wasm/       # WASM compilation target
+├── skills/
+│   └── extraction/       # First built-in skill (extract structured data)
 ├── examples/
 │   ├── shell/            # Native CLI example with shell tool
 │   ├── browser/          # Browser demo with WebLLM
-│   └── edge/             # Deno edge runtime demo
+│   ├── edge/             # Deno edge runtime demo
+│   └── with-extraction-skill/  # Extraction skill demo
 └── docs/                 # GitHub Pages documentation site
 ```
 
@@ -66,8 +69,9 @@ agent-rs/
 Pure Rust agent logic with **zero** platform dependencies:
 
 - **agent.rs** - Agent state management and decision loop
-- **protocol.rs** - Parse model output (JSON tool call vs plain text answer)
+- **protocol.rs** - Parse model output (JSON tool/skill call vs plain text answer)
 - **tool.rs** - Tool request/result abstractions
+- **skill.rs** - Skill contracts, validation, and guardrails
 
 Compiles to `wasm32-unknown-unknown` without feature flags.
 
@@ -103,6 +107,65 @@ The model invokes tools via JSON:
 - Presence of `"tool"` field → tool invocation
 - Any other output → final answer
 - No schema negotiation, no OpenAI-style function calling
+
+## Skills
+
+Skills are contract-based operations with built-in guardrails. Unlike tools (which are host-provided capabilities), skills are:
+
+- **Contract-based** - Defined by explicit input/output schemas
+- **Guardrail-enforced** - Outputs are validated before acceptance
+- **Host-agnostic** - Same behavior across CLI, browser, and edge
+
+### Extraction Skill
+
+The first built-in skill is `extract` - extracting structured information from unstructured text.
+
+**Invocation:**
+
+```json
+{
+  "skill": "extract",
+  "text": "Contact us at hello@agent.rs",
+  "target": "email"
+}
+```
+
+**Supported targets:** `email`, `url`, `date`, `entity`
+
+**Output:**
+
+```json
+{
+  "email": ["hello@agent.rs"]
+}
+```
+
+### Skill Guardrails
+
+The extraction skill enforces strict guardrails:
+
+1. **Schema Validation** - Output must be valid JSON with the target field
+2. **Anti-Hallucination** - Extracted values must appear in the source text
+3. **Type Correctness** - Values must match expected formats
+
+**Example guardrail rejection:**
+
+```
+Input: "Contact us anytime"
+LLM Output: {"email": "contact@example.com"}
+Rejection: HallucinationDetected - 'contact@example.com' not found in source text
+```
+
+### Skills vs Tools
+
+| Aspect | Tools | Skills |
+|--------|-------|--------|
+| Definition | Host-provided capabilities | Contract-based operations |
+| Validation | PlausibilityGuard | Schema + Semantic guardrails |
+| Execution | Host executes directly | Host executes, core validates |
+| Examples | `shell`, `fetch_url`, `read_dom` | `extract` |
+
+See [skills/extraction/](skills/extraction/) for the full skill contract and implementation.
 
 ## Quick Start
 

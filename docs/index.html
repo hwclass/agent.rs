@@ -17,6 +17,7 @@
       <nav>
         <a href="#why">Why</a>
         <a href="#architecture">Architecture</a>
+        <a href="#skills">Skills</a>
         <a href="#getting-started">Get Started</a>
         <a href="#hosts">Hosts</a>
         <a href="https://github.com/hwclass/agent.rs" target="_blank">GitHub</a>
@@ -137,7 +138,89 @@
   </div>
 </section>
 
-    <section id="hosts" class="section alt">
+    <section id="skills" class="section alt">
+      <div class="container">
+        <h2>Skills: Contract-Based Operations</h2>
+        <p class="subtitle">Skills are different from tools. They're contract-based operations with built-in guardrails, following <a href="https://agentskills.io" target="_blank">Anthropic's Agent Skills specification</a>.</p>
+
+        <div class="skills-comparison">
+          <div class="comparison-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Aspect</th>
+                  <th>Tools</th>
+                  <th>Skills</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Definition</td>
+                  <td>Host-provided capabilities</td>
+                  <td>Contract-based operations</td>
+                </tr>
+                <tr>
+                  <td>Validation</td>
+                  <td>PlausibilityGuard</td>
+                  <td>Schema + Semantic guardrails</td>
+                </tr>
+                <tr>
+                  <td>Execution</td>
+                  <td>Host executes directly</td>
+                  <td>Host executes, core validates</td>
+                </tr>
+                <tr>
+                  <td>Examples</td>
+                  <td><code>shell</code>, <code>fetch_url</code>, <code>read_dom</code></td>
+                  <td><code>extract</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="skill-card">
+          <h3>Extraction Skill</h3>
+          <p>The first built-in skill extracts structured data from unstructured text.</p>
+
+          <div class="skill-targets">
+            <h4>Supported Targets</h4>
+            <ul>
+              <li><code>email</code> — Email addresses</li>
+              <li><code>url</code> — URLs and links</li>
+              <li><code>date</code> — Dates (ISO format)</li>
+              <li><code>entity</code> — Named entities (people, organizations, locations)</li>
+              <li><code>name</code> — Person names</li>
+            </ul>
+          </div>
+
+          <div class="skill-example">
+            <h4>Example</h4>
+            <pre class="code-block">
+# CLI
+agent extract --text "Contact Dr. Sarah Johnson at sarah@example.com" --target name
+# Output: {"name": ["Dr. Sarah Johnson"]}
+
+# Browser / Edge
+{"skill": "extract", "text": "Contact Dr. Sarah Johnson", "target": "name"}
+            </pre>
+          </div>
+
+          <div class="skill-guardrails">
+            <h4>Built-in Guardrails</h4>
+            <ul>
+              <li><strong>Schema Validation</strong> — Output must match expected JSON structure</li>
+              <li><strong>Anti-Hallucination</strong> — Extracted values must exist in source text</li>
+              <li><strong>Type Correctness</strong> — Values must match target type format</li>
+            </ul>
+          </div>
+        </div>
+
+        <p class="emphasis">Skills make failure explicit. If the LLM hallucinates a value not in the source text, the guardrail rejects it.</p>
+      </div>
+    </section>
+
+    <section id="hosts" class="section">
       <div class="container">
         <h2>Three Hosts, One Agent</h2>
 
@@ -188,10 +271,16 @@ agent.rs/
 │  ├─ agent-native/   # CLI runtime (llama.cpp, shell tools)
 │  └─ agent-wasm/     # WASM bindings for agent-core
 │
+├─ skills/
+│  └─ extraction/     # First built-in skill
+│     ├─ SKILL.md     # Skill contract (Agent Skills spec)
+│     ├─ schema.json  # JSON schema for input/output
+│     └─ README.md    # Quick start guide
+│
 ├─ examples/
-│  ├─ shell/          # Native CLI example
 │  ├─ browser/        # WebLLM + WASM browser demo
-│  └─ edge/           # Deno-based edge runtime
+│  ├─ edge/           # Deno-based edge runtime
+│  └─ with-extraction-skill/  # Skill demo walkthrough
 │
 ├─ Makefile
 └─ README.md

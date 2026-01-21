@@ -446,6 +446,79 @@ body.dark .hero {
   text-align: center;
 }
 
+/* Skills Section */
+.skills-comparison {
+  margin: 2rem 0;
+}
+
+.comparison-table {
+  overflow-x: auto;
+}
+
+.comparison-table table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--bg-color);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.comparison-table th,
+.comparison-table td {
+  padding: 1rem 1.5rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.comparison-table th {
+  background: var(--primary-color);
+  color: white;
+  font-weight: 600;
+}
+
+.comparison-table tr:last-child td {
+  border-bottom: none;
+}
+
+.comparison-table tr:hover td {
+  background: rgba(52, 152, 219, 0.05);
+}
+
+.skill-card {
+  background: var(--bg-color);
+  padding: 2rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  margin: 2rem 0;
+}
+
+.skill-card h3 {
+  color: var(--secondary-color);
+  margin-bottom: 1rem;
+  font-size: 1.4rem;
+}
+
+.skill-card h4 {
+  color: var(--primary-color);
+  margin: 1.5rem 0 0.8rem;
+  font-size: 1.1rem;
+}
+
+.skill-targets ul,
+.skill-guardrails ul {
+  margin-left: 1.5rem;
+}
+
+.skill-targets li,
+.skill-guardrails li {
+  margin-bottom: 0.5rem;
+}
+
+.skill-example pre {
+  margin: 1rem 0;
+}
+
 /* Roadmap */
 .roadmap-timeline {
   display: grid;
@@ -589,5 +662,22 @@ html {
   .architecture-caption {
     background: #1a1f24;
     border-left-color: var(--secondary-color);
+  }
+
+  .comparison-table table {
+    background: var(--bg-alt);
+  }
+
+  .comparison-table th {
+    background: #1e293b;
+  }
+
+  .comparison-table tr:hover td {
+    background: rgba(249, 115, 22, 0.08);
+  }
+
+  .skill-card {
+    background: var(--bg-alt);
+    border-color: var(--border-color);
   }
 }

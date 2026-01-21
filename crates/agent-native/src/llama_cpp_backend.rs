@@ -36,12 +36,13 @@ impl LlamaCppBackend {
 
         // Load model
         let model_params = LlamaModelParams::default();
-        let model = Box::new(LlamaModel::load_from_file(&backend, model_path, &model_params)
-            .context("Failed to load model")?);
+        let model = Box::new(
+            LlamaModel::load_from_file(&backend, model_path, &model_params)
+                .context("Failed to load model")?,
+        );
 
         // Create context - it borrows from model
-        let ctx_params = LlamaContextParams::default()
-            .with_n_ctx(NonZeroU32::new(2048));
+        let ctx_params = LlamaContextParams::default().with_n_ctx(NonZeroU32::new(2048));
 
         let context = model
             .new_context(&backend, ctx_params)
@@ -76,11 +77,7 @@ impl Drop for LlamaCppBackend {
 impl LLMBackend for LlamaCppBackend {
     fn infer(&mut self, input: LLMInput) -> Result<LLMOutput> {
         // SAFETY: context pointer is valid for the lifetime of Self
-        let context = unsafe {
-            self.context
-                .as_mut()
-                .context("Context pointer is null")?
-        };
+        let context = unsafe { self.context.as_mut().context("Context pointer is null")? };
 
         // Suppress stderr during first decode (Metal shader compilation logs)
         let _stderr_redirect = if input.first_generation {

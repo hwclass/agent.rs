@@ -196,23 +196,19 @@ impl SemanticGuardrail for PlausibilityGuard {
 
         // Check for empty output
         if output.trim().is_empty() {
-            return GuardrailResult::reject(
-                "Tool output is empty - no data returned"
-            );
+            return GuardrailResult::reject("Tool output is empty - no data returned");
         }
 
         // Check for metadata-only output
         if Self::is_metadata_only(output) {
             return GuardrailResult::reject(
-                "Tool output contains only metadata (e.g. 'total' line), not actual data"
+                "Tool output contains only metadata (e.g. 'total' line), not actual data",
             );
         }
 
         // Check for minimal substance
         if !Self::has_minimal_substance(output) {
-            return GuardrailResult::reject(
-                "Tool output lacks substantive content"
-            );
+            return GuardrailResult::reject("Tool output lacks substantive content");
         }
 
         GuardrailResult::Accept
@@ -316,8 +312,7 @@ mod tests {
         };
         let result = ToolResult::success("total 123");
 
-        let chain = GuardrailChain::new()
-            .add(Box::new(PlausibilityGuard::new()));
+        let chain = GuardrailChain::new().add(Box::new(PlausibilityGuard::new()));
 
         let ctx = make_context(&state, &request, &result);
         let validation = chain.validate(&ctx);

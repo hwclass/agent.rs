@@ -27,6 +27,7 @@ interface AgentWasm {
 
 type AgentDecision =
   | { type: 'invoke_tool'; tool: string; params: any }
+  | { type: 'invoke_skill'; skill: string; params: any }
   | { type: 'done'; answer: string }
   | { type: 'inconclusive'; output: string };
 
@@ -107,6 +108,96 @@ async function executeTool(tool: string, params: any): Promise<{ success: boolea
 }
 
 /**
+ * Execute extraction skill
+ */
+async function executeSkill(skill: string, params: any): Promise<{ success: boolean; output: string; error?: string }> {
+  try {
+    if (skill !== 'extract') {
+      throw new Error(`Unknown skill: ${skill}`);
+    }
+
+    const { text, target } = params;
+    if (!text) throw new Error('Missing text parameter');
+    if (!target) throw new Error('Missing target parameter');
+
+    // Validate target
+    const validTargets = ['email', 'url', 'date', 'entity', 'name'];
+    if (!validTargets.includes(target)) {
+      throw new Error(`Invalid target: ${target}. Must be one of: ${validTargets.join(', ')}`);
+    }
+
+    // Call LLM to extract
+    const extractPrompt = buildExtractionPrompt(text, target);
+    const response = await engine.chat.completions.create({
+      messages: [{ role: 'user', content: extractPrompt }],
+      temperature: 0.3,
+      max_tokens: 256
+    });
+
+    const llmOutput = response.choices[0].message.content.trim();
+
+    // Parse and validate output
+    let parsed: any;
+    try {
+      parsed = JSON.parse(llmOutput);
+    } catch {
+      throw new Error(`MalformedOutput: LLM returned invalid JSON: ${llmOutput}`);
+    }
+
+    // Check target field exists
+    if (!(target in parsed)) {
+      throw new Error(`SchemaViolation: output missing '${target}' field`);
+    }
+
+    // Anti-hallucination check
+    const values = Array.isArray(parsed[target]) ? parsed[target] : [parsed[target]];
+    const textLower = text.toLowerCase();
+    for (const val of values) {
+      if (typeof val === 'string' && val.length > 0) {
+        if (!textLower.includes(val.toLowerCase())) {
+          throw new Error(`HallucinationDetected: '${val}' not found in source text`);
+        }
+      }
+    }
+
+    return { success: true, output: JSON.stringify(parsed) };
+  } catch (error: any) {
+    return { success: false, output: '', error: error.message };
+  }
+}
+
+/**
+ * Build extraction prompt for skill
+ */
+function buildExtractionPrompt(text: string, target: string): string {
+  const targetDesc: Record<string, string> = {
+    email: 'email addresses',
+    url: 'URLs',
+    date: 'dates (in ISO format YYYY-MM-DD)',
+    entity: 'named entities (people, organizations, locations)',
+    name: 'person names (first name, last name, full names)'
+  };
+
+  const outputFormat = target === 'entity'
+    ? '{"entity": {"people": [...], "organizations": [...], "locations": [...]}}'
+    : `{"${target}": [...]}`;
+
+  return `Extract ${targetDesc[target]} from the following text.
+
+IMPORTANT:
+- Output ONLY valid JSON
+- Only include values that ACTUALLY APPEAR in the text
+- Do NOT invent or hallucinate values
+- If no matches found, return an empty array
+
+Text: "${text}"
+
+Output format: ${outputFormat}
+
+JSON output:`;
+}
+
+/**
  * Validate with guardrails (same logic as native PlausibilityGuard)
  */
 function validateOutput(output: string): { accept: boolean; reason?: string } {
@@ -166,31 +257,36 @@ async function runAgent(query: string): Promise<void> {
   // Create agent state
   let stateJson = wasm.create_agent_state(query);
 
-  // System prompt with tool obligations
-  const systemPrompt = `You are an agent with tools:
-- read_dom: {"tool":"read_dom","selector":"h1"}
-- fetch_url: {"tool":"fetch_url","url":"https://httpbin.org/json"}
+  // System prompt with tool and skill obligations
+  const systemPrompt = `You are an agent. You can use TOOLS or SKILLS.
 
-CRITICAL RULES:
-1. If a task requires information from the ENVIRONMENT (DOM content, external URLs), you MUST invoke a tool.
-2. If a task can be answered with your own knowledge (math, general facts), answer DIRECTLY without tools.
-3. Do NOT explain what tool should be used.
-4. Do NOT describe how to solve the task.
+TOOLS use "tool" key:
+- {"tool":"read_dom","selector":"h1"} - read from THIS PAGE
+- {"tool":"fetch_url","url":"https://example.com"} - fetch external URL
+
+SKILLS use "skill" key (NOT "tool"):
+- {"skill":"extract","text":"quoted text here","target":"email"} - extract from quoted text
+  Targets: email, url, date, entity, name
+
+IMPORTANT: Skills use "skill" key, tools use "tool" key. Do not confuse them.
 
 Examples:
 User: Extract the page title
-Assistant: {"tool":"read_dom","selector":"title"}
+{"tool":"read_dom","selector":"title"}
 
-User: Fetch data from https://httpbin.org/json
-Assistant: {"tool":"fetch_url","url":"https://httpbin.org/json"}
+User: Extract emails from "Contact hello@agent.rs"
+{"skill":"extract","text":"Contact hello@agent.rs","target":"email"}
 
-User: What is 2 + 2?
-Assistant: 4
+User: Extract URLs from "Visit https://agent.rs"
+{"skill":"extract","text":"Visit https://agent.rs","target":"url"}
 
-User: What is the capital of France?
-Assistant: Paris
+User: Fetch https://httpbin.org/json
+{"tool":"fetch_url","url":"https://httpbin.org/json"}
 
-Respond with JSON to use a tool, or plain text to answer directly.`;
+User: What is 2+2?
+4
+
+Output JSON for tools/skills, plain text for answers.`;
 
   const userPrompt = `${systemPrompt}\n\nUser: ${query}\n\nAssistant:`;
 
@@ -198,7 +294,7 @@ Respond with JSON to use a tool, or plain text to answer directly.`;
   render('<div class="status info">Calling WebLLM...</div>');
   const response = await engine.chat.completions.create({
     messages: [{ role: 'user', content: userPrompt }],
-    temperature: 0.7,
+    temperature: 0.3,  // Lower temperature for more consistent tool/skill selection
     max_tokens: 256
   });
 
@@ -210,7 +306,25 @@ Respond with JSON to use a tool, or plain text to answer directly.`;
   const stepOutput = JSON.parse(wasm.run_agent_step(JSON.stringify(stepInput)));
   const decision: AgentDecision = stepOutput.decision;
 
-  if (decision.type === 'invoke_tool') {
+  if (decision.type === 'invoke_skill') {
+    render(`<div class="tool-call"><span class="label">→ Skill:</span> ${decision.skill}</div>`);
+
+    // Execute skill
+    const result = await executeSkill(decision.skill, decision.params);
+
+    if (result.success) {
+      render('<div class="guardrail-result accept">✓ Skill Guardrails: Passed</div>');
+      render(`<div class="final-answer"><h3>Extraction Result</h3><pre>${result.output}</pre></div>`);
+    } else {
+      render(`<div class="guardrail-result reject">✗ Skill Error: ${result.error}</div>`);
+      render(`<div class="status error">
+        <strong>❌ SKILL FAILED</strong><br><br>
+        ${result.error}<br><br>
+        <strong>The system refused to return incorrect results (by design).</strong>
+      </div>`);
+    }
+
+  } else if (decision.type === 'invoke_tool') {
     render(`<div class="tool-call"><span class="label">→ Tool:</span> ${decision.tool}</div>`);
 
     // Execute tool

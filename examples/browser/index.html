@@ -14,21 +14,21 @@
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       line-height: 1.6;
-      padding: 2rem;
-      max-width: 800px;
+      padding: 0.75rem 1rem 1.25rem;
+      max-width: 860px;
       margin: 0 auto;
       background: #f5f5f5;
     }
 
     h1 {
       color: #333;
-      margin-bottom: 0.5rem;
+      margin-bottom: 0.35rem;
     }
 
     .subtitle {
       color: #666;
       font-size: 0.9rem;
-      margin-bottom: 2rem;
+      margin-bottom: 0;
     }
 
     .card {
@@ -195,13 +195,34 @@
       font-family: 'Courier New', monospace;
       font-size: 0.9em;
     }
+
+    .hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.85rem;
+      text-align: center;
+    }
+
+    .logo {
+      width: clamp(180px, 28vw, 420px);
+      height: auto;
+      object-fit: contain;
+      filter: drop-shadow(0 10px 24px rgba(0,0,0,0.12));
+    }
   </style>
 </head>
 <body>
-  <h1>agent.rs Browser Example</h1>
-  <p class="subtitle">
-    Local-first AI agent with WebLLM + WASM • No API keys • Runs entirely in your browser
-  </p>
+  <div class="hero">
+    <img src="/agent-rs-logo.png" alt="agent.rs logo" class="logo" />
+    <div>
+      <h1>Browser Example</h1>
+      <p class="subtitle">
+        Local-first AI agent with WebLLM + WASM • No API keys • Runs entirely in your browser
+      </p>
+    </div>
+  </div>
 
   <div class="card">
     <div id="model-status" class="status info">

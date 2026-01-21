@@ -1,8 +1,10 @@
+use crate::skill::SkillRequest;
 use crate::tool::ToolRequest;
 
-/// Parse model output to determine if it contains a tool call
+/// Parse model output to determine if it contains a tool call, skill invocation, or final answer
 ///
 /// Protocol:
+/// - If the output contains valid JSON with a "skill" field, it's a skill invocation
 /// - If the output contains valid JSON with a "tool" field, it's a tool call
 /// - If the output appears to be reasoning/explanation without action, it's inconclusive
 /// - Otherwise, it's treated as a final answer
@@ -11,6 +13,14 @@ pub fn parse_model_output(output: &str) -> ParseResult {
 
     // Try to parse as JSON
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        // Check if it has a "skill" field first (skills take precedence)
+        if value.get("skill").is_some() {
+            // Try to deserialize as SkillRequest
+            if let Ok(skill_request) = serde_json::from_value::<SkillRequest>(value.clone()) {
+                return ParseResult::SkillCall(skill_request);
+            }
+        }
+
         // Check if it has a "tool" field
         if value.get("tool").is_some() {
             // Try to deserialize as ToolRequest
@@ -71,10 +81,13 @@ pub enum ParseResult {
     /// The model wants to invoke a tool
     ToolCall(ToolRequest),
 
+    /// The model wants to invoke a skill
+    SkillCall(SkillRequest),
+
     /// The model has produced a final answer
     FinalAnswer(String),
 
-    /// The model produced output that doesn't complete the task or invoke a tool
+    /// The model produced output that doesn't complete the task or invoke a tool/skill
     /// (reasoning, explanation, or malformed output)
     Inconclusive(String),
 }

@@ -135,6 +135,26 @@ curl -X POST http://localhost:8000 \
   -d '{"query": "Fetch data from https://httpbin.org/json"}'
 ```
 
+### Call the extraction skill directly
+
+```bash
+curl -X POST http://localhost:8000/skill/extract \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Email us at support@agent.rs or sales@agent.rs","target":"email"}'
+```
+
+You can also send the same payload to `/` with `"skill": "extract"` if you prefer a single endpoint.
+
+Example (single endpoint):
+
+```bash
+curl -X POST http://localhost:8000 \
+  -H "Content-Type: application/json" \
+  -d '{"skill":"extract","text":"Email us at support@agent.rs or sales@agent.rs","target":"email"}'
+```
+
+If you see a JSON parse error, double-check quotes: wrap the whole payload in single quotes and keep the keys/values double-quoted, as shown above.
+
 ### Success Response (HTTP 200)
 
 ```json
